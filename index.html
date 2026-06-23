@@ -280,7 +280,7 @@ function Home({ onSelectLine }) {
         React.createElement(PosterWord, { label: line.label, active: line.active }))))));
 }
 /* ---------- Galería con swipe ---------- */
-function ClothingGallery({ items, onOpenItem, onBack, onOpenGrid, initialIndex = 0 }) {
+function ClothingGallery({ items, onOpenItem, onBack, onOpenGrid, onOpenCalendar, initialIndex = 0 }) {
     const [index, setIndex] = useState(initialIndex);
     const [dragX, setDragX] = useState(0);
     const [dragging, setDragging] = useState(false);
@@ -322,6 +322,7 @@ function ClothingGallery({ items, onOpenItem, onBack, onOpenGrid, initialIndex =
         }
     };
     const handleEnd = () => {
+        if (directionRef.current === "v" && lastDeltaYRef.current > 50) { onOpenCalendar(); setDragX(0); setDragging(false); return; }
         if (directionRef.current === "v" && lastDeltaYRef.current < -50) {
             onOpenGrid(index);
             setDragX(0);
@@ -825,6 +826,27 @@ function IdeasMenu({ item, ideas, onNewIdea, onBack }) {
             } },
             React.createElement(PosterWord, { label: "NUEVA IDEA", active: true, fontSize: "9vw" }))));
 }
+
+/* ---------- Calendario PBR ---------- */
+function PBRCalendar({ideasByItem, items, onBack}) {
+ const [view,setView]=useState("MES"), [cursor,setCursor]=useState(new Date()), [open,setOpen]=useState(null), start=useRef(null);
+ const events=[]; Object.keys(ideasByItem).forEach(id=>(ideasByItem[id]||[]).forEach(x=>{const sil=(items.find(i=>i.id===id)||{}).name||""; const base=new Date(); const add=(n)=>{let d=new Date(base);d.setDate(d.getDate()+(parseInt(n)||0));return d};
+ if(x.tiempoMuestra)events.push({d:add(x.tiempoMuestra),c:"#4FAE63",t:`Llega la muestra de ${x.nombre||"Idea sin nombre"} — ${sil}`});
+ if(x.tiempoMuestra&&x.tiempoFabricacion)events.push({d:add((parseInt(x.tiempoMuestra)||0)+(parseInt(x.tiempoFabricacion)||0)),c:"#E5C84B",t:`Termina la fabricación de ${x.nombre||"Idea sin nombre"} — ${sil}`});
+ if(x.fechaDisponible)events.push({d:new Date(x.fechaDisponible),c:"#E78335",t:`Llega ${x.nombre||"Idea sin nombre"} — ${sil} a casa`});
+ if(x.fechaRelease)events.push({d:new Date(x.fechaRelease),c:"#D94A43",t:`Release de ${x.nombre||"Idea sin nombre"} — ${sil}`});
+ }));
+ const months=view==="MES"?1:view==="TRIMESTRE"?3:view==="SEMESTRE"?6:12;
+ const shift=n=>setCursor(d=>{let x=new Date(d);x.setMonth(x.getMonth()+n*months);return x});
+ const title=view==="MES"?cursor.toLocaleDateString("es-ES",{month:"long",year:"numeric"}):view==="AÑO"?String(cursor.getFullYear()):`${cursor.toLocaleDateString("es-ES",{month:"short"})} — ${new Date(cursor.getFullYear(),cursor.getMonth()+months-1).toLocaleDateString("es-ES",{month:"short",year:"numeric"})}`;
+ const days=[]; for(let m=0;m<months;m++){let y=cursor.getFullYear(),mo=cursor.getMonth()+m, count=new Date(y,mo+1,0).getDate();days.push(...Array.from({length:count},(_,i)=>new Date(y,mo,i+1)))}
+ return React.createElement("div",{style:{position:"absolute",inset:0,background:"#0A0A0A",color:"#F5F5F0",padding:"18px 16px",boxSizing:"border-box",overflow:"auto"},onTouchStart:e=>start.current=e.touches[0].clientX,onTouchEnd:e=>{let d=e.changedTouches[0].clientX-start.current;if(Math.abs(d)>45)shift(d<0?1:-1)}},
+ React.createElement("button",{onClick:onBack,style:{background:"none",border:0,color:"#aaa",fontSize:14,padding:0}},"← VOLVER"),
+ React.createElement("div",{style:{fontSize:"17vw",fontWeight:900,letterSpacing:-5,lineHeight:.85,marginTop:25,textTransform:"uppercase"}},"CALENDARIO"),
+ React.createElement("div",{style:{fontSize:24,fontWeight:700,margin:"24px 0 14px",textTransform:"uppercase"}},title),
+ React.createElement("div",{style:{display:"flex",gap:5,marginBottom:20}},["MES","TRIMESTRE","SEMESTRE","AÑO"].map(v=>React.createElement("button",{onClick:()=>setView(v),style:{flex:1,padding:"10px 2px",background:view===v?"#F5F5F0":"#151515",color:view===v?"#0A0A0A":"#aaa",border:"1px solid #333",fontSize:9,fontWeight:800}},v))),
+ React.createElement("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}},["L","M","X","J","V","S","D"].map(x=>React.createElement("div",{style:{fontSize:10,color:"#777",textAlign:"center",padding:4}},x)),days.map((d,i)=>{let ev=events.filter(e=>e.d.toDateString()===d.toDateString());return React.createElement("button",{key:i,onClick:()=>ev.length&&setOpen(open===i?null:i),style:{minHeight:52,background:"#111",border:"1px solid #1e1e1e",color:"#eee",position:"relative",fontSize:13}},d.getDate(),ev.map((e,j)=>React.createElement("span",{key:j,style:{position:"absolute",inset:4+j*2,border:`3px solid ${e.c}`,borderRadius:`${45+j*12}% ${55-j*7}% ${48+j*9}% ${52-j*5}%`,transform:`rotate(${j%2?7:-6}deg)`,pointerEvents:"none"}})),open===i&&React.createElement("div",{style:{position:"absolute",zIndex:5,left:0,top:"100%",width:220,background:"#F5F5F0",color:"#111",padding:12,textAlign:"left",fontSize:12,boxShadow:"0 8px 25px #000"}},ev.map((e,j)=>React.createElement("div",{key:j,style:{padding:"7px 0",borderBottom:"1px solid #ddd"}},e.t)))}))));}
+
 /* ---------- App raíz ---------- */
 function PBRApp() {
     const [screen, setScreen] = useState("splash"); // splash | home | gallery | grid | ideas | newIdea
@@ -869,7 +891,8 @@ function PBRApp() {
         } },
         screen === "splash" && React.createElement(SplashScreen, { onDone: goHome }),
         screen === "home" && React.createElement(Home, { onSelectLine: openGallery }),
-        screen === "gallery" && (React.createElement(ClothingGallery, { key: galleryIndex, items: CLOTHING_ITEMS, initialIndex: galleryIndex, onOpenItem: openIdeas, onBack: goHome, onOpenGrid: openGrid })),
+        screen === "gallery" && (React.createElement(ClothingGallery, { key: galleryIndex, items: CLOTHING_ITEMS, initialIndex: galleryIndex, onOpenItem: openIdeas, onBack: goHome, onOpenGrid: openGrid, onOpenCalendar: () => setScreen("calendar") }))
+        ,screen === "calendar" && React.createElement(PBRCalendar,{ideasByItem:ideasByItem,items:CLOTHING_ITEMS,onBack:()=>setScreen("gallery")}),
         screen === "grid" && (React.createElement(ClothingGrid, { items: CLOTHING_ITEMS, onSelectItem: selectFromGrid, onBack: () => setScreen("gallery") })),
         screen === "ideas" && selectedItem && (React.createElement(IdeasMenu, { item: selectedItem, ideas: ideasByItem[selectedItem.id] || [], onNewIdea: () => setScreen("newIdea"), onBack: () => setScreen("gallery") })),
         screen === "newIdea" && selectedItem && (React.createElement(NewIdeaForm, { item: selectedItem, onSave: saveIdea, onCancel: () => setScreen("ideas") }))));
