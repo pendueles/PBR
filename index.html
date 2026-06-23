@@ -195,7 +195,7 @@ function SplashScreen({ onDone }) {
       `)));
 }
 /* ---------- Línea de Home: una palabra que se estira a ancho completo ---------- */
-function PosterWord({ label, active }) {
+function PosterWord({ label, active, fontSize = "20vw" }) {
     const spanRef = useRef(null);
     const [scaleX, setScaleX] = useState(1);
     useEffect(() => {
@@ -219,7 +219,7 @@ function PosterWord({ label, active }) {
             fontWeight: 900,
             lineHeight: 0.82,
             color: active ? "#F5F5F0" : "#3A3A3A",
-            fontSize: "20vw",
+            fontSize: fontSize,
             whiteSpace: "nowrap",
             transform: `scaleX(${scaleX})`,
             transformOrigin: "center",
@@ -275,12 +275,16 @@ function ClothingGallery({ items, onOpenItem, onBack }) {
         if (startRef.current === null)
             return;
         const delta = clientX - startRef.current;
-        if (Math.abs(delta) > 6)
+        if (Math.abs(delta) > 4)
             movedRef.current = true;
-        setDragX(delta);
+        // Resistencia leve (rubber band) cuando no hay más tarjetas en esa dirección
+        const atStart = index === 0 && delta > 0;
+        const atEnd = index === items.length - 1 && delta < 0;
+        const eased = atStart || atEnd ? delta * 0.35 : delta;
+        setDragX(eased);
     };
     const handleEnd = () => {
-        const threshold = 80;
+        const threshold = 60;
         if (dragX <= -threshold) {
             goTo(index + 1);
         }
@@ -336,8 +340,10 @@ function ClothingGallery({ items, onOpenItem, onBack }) {
                 userSelect: "none",
             }, onMouseDown: (e) => handleStart(e.clientX), onMouseMove: (e) => dragging && handleMove(e.clientX), onMouseUp: handleEnd, onMouseLeave: () => dragging && handleEnd(), onTouchStart: (e) => handleStart(e.touches[0].clientX), onTouchMove: (e) => handleMove(e.touches[0].clientX), onTouchEnd: handleEnd, onClick: handleTap },
             React.createElement("div", { style: {
-                    transform: `translateX(${dragX}px) rotate(${dragX / 40}deg)`,
-                    transition: dragging ? "none" : "transform 250ms ease",
+                    transform: `translateX(${dragX}px) rotate(${dragX / 60}deg)`,
+                    transition: dragging
+                        ? "none"
+                        : "transform 320ms cubic-bezier(0.22, 1, 0.36, 1)",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
@@ -346,20 +352,13 @@ function ClothingGallery({ items, onOpenItem, onBack }) {
                 } },
                 React.createElement("div", { style: {
                         position: "relative",
-                        width: 240,
-                        height: 300,
+                        width: 300,
+                        height: 375,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                    } },
-                    [
-                        { top: -1, left: -1, borderRight: "none", borderBottom: "none" },
-                        { top: -1, right: -1, borderLeft: "none", borderBottom: "none" },
-                        { bottom: -1, left: -1, borderRight: "none", borderTop: "none" },
-                        { bottom: -1, right: -1, borderLeft: "none", borderTop: "none" },
-                    ].map((pos, i) => (React.createElement("div", { key: i, style: Object.assign({ position: "absolute", width: 16, height: 16, border: "1.5px solid #1A1A1A" }, pos) }))),
-                    item.imageSrc ? (React.createElement("img", { src: item.imageSrc, alt: item.name, style: { maxWidth: "78%", maxHeight: "78%", objectFit: "contain" } })) : (React.createElement("svg", { width: "64", height: "64", viewBox: "0 0 24 24", fill: "none" },
-                        React.createElement("path", { d: "M8 4 L4 7 L6 10 L8 8.5 V20 H16 V8.5 L18 10 L20 7 L16 4 L14 5.5 H10 Z", stroke: "#B5B5B0", strokeWidth: "1.2", strokeLinejoin: "round" })))),
+                    } }, item.imageSrc ? (React.createElement("img", { src: item.imageSrc, alt: item.name, style: { maxWidth: "82%", maxHeight: "82%", objectFit: "contain" } })) : (React.createElement("svg", { width: "80", height: "80", viewBox: "0 0 24 24", fill: "none" },
+                    React.createElement("path", { d: "M8 4 L4 7 L6 10 L8 8.5 V20 H16 V8.5 L18 10 L20 7 L16 4 L14 5.5 H10 Z", stroke: "#B5B5B0", strokeWidth: "1.2", strokeLinejoin: "round" })))),
                 React.createElement("div", { style: { textAlign: "center" } },
                     React.createElement("div", { style: {
                             fontSize: 18,
@@ -637,18 +636,18 @@ function IdeasMenu({ item, ideas, onNewIdea, onBack }) {
                 React.createElement("div", null,
                     "Release: ",
                     React.createElement("span", { style: { color: "#D9D9D9" } }, idea.fechaRelease || "—")))))))),
-        React.createElement("div", { style: { padding: 16, borderTop: "1px solid #1A1A1A" } },
-            React.createElement("button", { onClick: onNewIdea, style: {
-                    width: "100%",
-                    background: ACCENT,
-                    border: "none",
-                    borderRadius: 8,
-                    padding: "14px 0",
-                    color: "#0A0A0A",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                } }, "+ Nueva idea"))));
+        React.createElement("button", { onClick: onNewIdea, style: {
+                width: "100%",
+                background: "#0A0A0A",
+                border: "none",
+                borderTop: "1px solid #1A1A1A",
+                padding: "18px 0",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+            } },
+            React.createElement(PosterWord, { label: "NUEVA IDEA", active: true, fontSize: "9vw" }))));
 }
 /* ---------- App raíz ---------- */
 function PBRApp() {
