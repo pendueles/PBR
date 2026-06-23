@@ -124,9 +124,9 @@ const FORM_FIELDS = [
     { key: "costeProduccion", label: "Coste aprox. de producción / ud.", unit: "€", type: "number" },
     { key: "unidades", label: "Unidades aproximadas", unit: "ud.", type: "number" },
     { key: "pvp", label: "PVP", unit: "€", type: "number" },
-    { key: "tiempoMuestra", label: "Tiempo estimado de muestra", unit: "", type: "text" },
-    { key: "tiempoFabricacion", label: "Tiempo estimado de fabricación", unit: "", type: "text" },
-    { key: "tiempoEnvio", label: "Tiempo estimado de envío", unit: "", type: "text" },
+    { key: "tiempoMuestra", label: "Tiempo estimado de muestra", unit: "días", type: "number" },
+    { key: "tiempoFabricacion", label: "Tiempo estimado de fabricación", unit: "días", type: "number" },
+    { key: "tiempoEnvio", label: "Tiempo estimado de envío", unit: "días", type: "number" },
     { key: "costeEnvio", label: "Coste estimado de envío / ud.", unit: "€", type: "number" },
     { key: "fechaRelease", label: "Fecha estimada de release", unit: "", type: "date" },
 ];
@@ -138,6 +138,32 @@ function calcBeneficio({ pvp, costeProduccion, costeEnvio, unidades }) {
     if ([p, c, e, u].some((v) => Number.isNaN(v)))
         return null;
     return (p - c - e) * u;
+}
+function calcFechaDisponible({ tiempoMuestra, tiempoFabricacion, tiempoEnvio }) {
+    const m = parseFloat(tiempoMuestra);
+    const f = parseFloat(tiempoFabricacion);
+    const e = parseFloat(tiempoEnvio);
+    if ([m, f, e].some((v) => Number.isNaN(v)))
+        return null;
+    const totalDias = m + f + e;
+    const fecha = new Date();
+    fecha.setDate(fecha.getDate() + totalDias);
+    return fecha;
+}
+function calcDiasSobrantes(fechaDisponible, fechaReleaseStr) {
+    if (!fechaDisponible || !fechaReleaseStr)
+        return null;
+    const fechaRelease = new Date(fechaReleaseStr);
+    if (isNaN(fechaRelease.getTime()))
+        return null;
+    const msPorDia = 1000 * 60 * 60 * 24;
+    const diff = Math.round((fechaRelease.getTime() - fechaDisponible.getTime()) / msPorDia);
+    return diff;
+}
+function formatFecha(fecha) {
+    if (!fecha)
+        return "—";
+    return fecha.toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 }
 function formatMoney(value) {
     if (value === null || value === undefined)
@@ -466,6 +492,7 @@ function LinkListField({ label, links, onChange }) {
 }
 /* ---------- Formulario Nueva idea ---------- */
 function NewIdeaForm({ item, onSave, onCancel }) {
+    const [nombre, setNombre] = useState("");
     const [refLinks, setRefLinks] = useState([]);
     const [designLinks, setDesignLinks] = useState([]);
     const [values, setValues] = useState({
@@ -479,10 +506,13 @@ function NewIdeaForm({ item, onSave, onCancel }) {
         fechaRelease: "",
     });
     const beneficio = useMemo(() => calcBeneficio(values), [values]);
+    const fechaDisponible = useMemo(() => calcFechaDisponible(values), [values]);
+    const diasSobrantes = useMemo(() => calcDiasSobrantes(fechaDisponible, values.fechaRelease), [fechaDisponible, values.fechaRelease]);
     const setField = (key, val) => setValues((v) => (Object.assign(Object.assign({}, v), { [key]: val })));
     const handleSave = () => {
-        onSave(Object.assign(Object.assign({ refLinks,
-            designLinks }, values), { beneficioEsperado: beneficio }));
+        onSave(Object.assign(Object.assign({ nombre,
+            refLinks,
+            designLinks }, values), { beneficioEsperado: beneficio, fechaDisponible: fechaDisponible ? fechaDisponible.toISOString() : null, diasSobrantes }));
     };
     return (React.createElement("div", { style: {
             position: "absolute",
@@ -498,6 +528,24 @@ function NewIdeaForm({ item, onSave, onCancel }) {
             React.createElement("div", { style: { fontSize: 11, letterSpacing: 1.5, color: "#6B6B6B", textTransform: "uppercase" } }, "Nueva idea"),
             React.createElement("div", { style: { fontSize: 18, fontWeight: 700, color: "#F5F5F0", marginTop: 2 } }, item.name)),
         React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: 16 } },
+            React.createElement("div", { style: { marginBottom: 14 } },
+                React.createElement("label", { style: {
+                        display: "block",
+                        fontSize: 12,
+                        color: "#8A8A8A",
+                        marginBottom: 6,
+                    } }, "Nombre"),
+                React.createElement("input", { type: "text", value: nombre, onChange: (e) => setNombre(e.target.value), placeholder: `Idea — ${item.name}`, style: {
+                        width: "100%",
+                        background: "#131313",
+                        border: "1px solid #232323",
+                        borderRadius: 8,
+                        padding: "11px 12px",
+                        color: "#F5F5F0",
+                        fontSize: 14,
+                        outline: "none",
+                        boxSizing: "border-box",
+                    } })),
             React.createElement(LinkListField, { label: "Link de refes", links: refLinks, onChange: setRefLinks }),
             React.createElement(LinkListField, { label: "Links de dise\u00F1os", links: designLinks, onChange: setDesignLinks }),
             FORM_FIELDS.map((f) => (React.createElement("div", { key: f.key, style: { marginBottom: 14 } },
@@ -538,15 +586,53 @@ function NewIdeaForm({ item, onSave, onCancel }) {
                         color: beneficio === null ? "#6B6B6B" : ACCENT,
                         marginTop: 4,
                     } }, beneficio === null ? "Pendiente de cálculo" : formatMoney(beneficio)),
-                React.createElement("div", { style: { fontSize: 11, color: "#5A5A5A", marginTop: 4 } }, "(PVP \u2212 coste producci\u00F3n \u2212 coste env\u00EDo) \u00D7 unidades, si se vende el 100%"))),
+                React.createElement("div", { style: { fontSize: 11, color: "#5A5A5A", marginTop: 4 } }, "(PVP \u2212 coste producci\u00F3n \u2212 coste env\u00EDo) \u00D7 unidades, si se vende el 100%")),
+            React.createElement("div", { style: {
+                    marginTop: 12,
+                    padding: 16,
+                    borderRadius: 10,
+                    border: "1px solid #232323",
+                    background: "#121212",
+                } },
+                React.createElement("div", { style: { fontSize: 11, color: "#8A8A8A", letterSpacing: 0.5, textTransform: "uppercase" } }, "Disponible el d\u00EDa"),
+                React.createElement("div", { style: {
+                        fontSize: 22,
+                        fontWeight: 800,
+                        color: fechaDisponible === null ? "#6B6B6B" : "#F5F5F0",
+                        marginTop: 4,
+                    } }, fechaDisponible === null ? "Pendiente de cálculo" : formatFecha(fechaDisponible)),
+                React.createElement("div", { style: { fontSize: 11, color: "#5A5A5A", marginTop: 4 } }, "Hoy + tiempo de muestra + fabricaci\u00F3n + env\u00EDo")),
+            React.createElement("div", { style: {
+                    marginTop: 12,
+                    padding: 16,
+                    borderRadius: 10,
+                    border: `1px solid ${diasSobrantes !== null && diasSobrantes < 0 ? "#FF4D4D33" : ACCENT + "33"}`,
+                    background: "#111611",
+                } },
+                React.createElement("div", { style: { fontSize: 11, color: "#8A8A8A", letterSpacing: 0.5, textTransform: "uppercase" } }, "Margen hasta el release"),
+                React.createElement("div", { style: {
+                        fontSize: 22,
+                        fontWeight: 800,
+                        color: diasSobrantes === null
+                            ? "#6B6B6B"
+                            : diasSobrantes < 0
+                                ? "#FF4D4D"
+                                : ACCENT,
+                        marginTop: 4,
+                    } }, diasSobrantes === null
+                    ? "Pendiente de cálculo"
+                    : diasSobrantes >= 0
+                        ? `Te sobran ${diasSobrantes} días`
+                        : `Vas ${Math.abs(diasSobrantes)} días tarde`),
+                React.createElement("div", { style: { fontSize: 11, color: "#5A5A5A", marginTop: 4 } }, "Diferencia entre disponible el d\u00EDa y fecha de release"))),
         React.createElement("div", { style: {
                 display: "flex",
+                flexDirection: "column",
                 gap: 10,
-                padding: 16,
+                padding: "16px 16px 0",
                 borderTop: "1px solid #1A1A1A",
             } },
             React.createElement("button", { onClick: onCancel, style: {
-                    flex: 1,
                     background: "none",
                     border: "1px solid #2A2A2A",
                     borderRadius: 8,
@@ -554,18 +640,18 @@ function NewIdeaForm({ item, onSave, onCancel }) {
                     color: "#B8B8B8",
                     fontSize: 14,
                     cursor: "pointer",
-                } }, "Cancelar"),
-            React.createElement("button", { onClick: handleSave, style: {
-                    flex: 2,
-                    background: ACCENT,
-                    border: "none",
-                    borderRadius: 8,
-                    padding: "13px 0",
-                    color: "#0A0A0A",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                } }, "Guardar idea"))));
+                } }, "Cancelar")),
+        React.createElement("button", { onClick: handleSave, style: {
+                width: "100%",
+                background: "#0A0A0A",
+                border: "none",
+                padding: "18px 0",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+            } },
+            React.createElement(PosterWord, { label: "GUARDAR IDEA", active: true, fontSize: "8vw" }))));
 }
 /* ---------- Menú de ideas de un artículo ---------- */
 function IdeasMenu({ item, ideas, onNewIdea, onBack }) {
@@ -609,11 +695,7 @@ function IdeasMenu({ item, ideas, onNewIdea, onBack }) {
                 padding: 14,
                 marginBottom: 10,
             } },
-            React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#F5F5F0", marginBottom: 8 } },
-                "Idea ",
-                i + 1,
-                " \u2014 ",
-                item.name),
+            React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#F5F5F0", marginBottom: 8 } }, idea.nombre ? idea.nombre : `Idea ${i + 1} — ${item.name}`),
             React.createElement("div", { style: {
                     display: "grid",
                     gridTemplateColumns: "1fr 1fr",
@@ -635,7 +717,26 @@ function IdeasMenu({ item, ideas, onNewIdea, onBack }) {
                         : formatMoney(idea.beneficioEsperado))),
                 React.createElement("div", null,
                     "Release: ",
-                    React.createElement("span", { style: { color: "#D9D9D9" } }, idea.fechaRelease || "—")))))))),
+                    React.createElement("span", { style: { color: "#D9D9D9" } }, idea.fechaRelease || "—")),
+                React.createElement("div", null,
+                    "Disponible:",
+                    " ",
+                    React.createElement("span", { style: { color: "#D9D9D9" } }, idea.fechaDisponible ? formatFecha(new Date(idea.fechaDisponible)) : "—")),
+                React.createElement("div", null,
+                    "Margen:",
+                    " ",
+                    React.createElement("span", { style: {
+                            color: idea.diasSobrantes === null || idea.diasSobrantes === undefined
+                                ? "#D9D9D9"
+                                : idea.diasSobrantes < 0
+                                    ? "#FF4D4D"
+                                    : ACCENT,
+                            fontWeight: 700,
+                        } }, idea.diasSobrantes === null || idea.diasSobrantes === undefined
+                        ? "—"
+                        : idea.diasSobrantes >= 0
+                            ? `+${idea.diasSobrantes}d`
+                            : `${idea.diasSobrantes}d`)))))))),
         React.createElement("button", { onClick: onNewIdea, style: {
                 width: "100%",
                 background: "#0A0A0A",
