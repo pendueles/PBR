@@ -139,14 +139,14 @@ function calcBeneficio({ pvp, costeProduccion, costeEnvio, unidades }) {
         return null;
     return (p - c - e) * u;
 }
-function calcFechaDisponible({ tiempoMuestra, tiempoFabricacion, tiempoEnvio }) {
+function calcFechaDisponible({ tiempoMuestra, tiempoFabricacion, tiempoEnvio }, fechaBase) {
     const m = parseFloat(tiempoMuestra);
     const f = parseFloat(tiempoFabricacion);
     const e = parseFloat(tiempoEnvio);
     if ([m, f, e].some((v) => Number.isNaN(v)))
         return null;
     const totalDias = m + f + e;
-    const fecha = new Date();
+    const fecha = fechaBase ? new Date(fechaBase) : new Date();
     fecha.setDate(fecha.getDate() + totalDias);
     return fecha;
 }
@@ -159,6 +159,70 @@ function calcDiasSobrantes(fechaDisponible, fechaReleaseStr) {
     const msPorDia = 1000 * 60 * 60 * 24;
     const diff = Math.round((fechaRelease.getTime() - fechaDisponible.getTime()) / msPorDia);
     return diff;
+}
+// Calcula los 4 hitos de calendario de una idea a partir de su fecha de creación
+// (o "hoy" como fallback para ideas guardadas antes de existir este campo).
+function calcHitosIdea(idea) {
+    const base = idea.fechaCreacion ? new Date(idea.fechaCreacion) : new Date();
+    const m = parseFloat(idea.tiempoMuestra);
+    const f = parseFloat(idea.tiempoFabricacion);
+    const e = parseFloat(idea.tiempoEnvio);
+    const hitos = {};
+    if (!Number.isNaN(m)) {
+        const fechaMuestra = new Date(base);
+        fechaMuestra.setDate(fechaMuestra.getDate() + m);
+        hitos.muestra = fechaMuestra;
+    }
+    if (!Number.isNaN(m) && !Number.isNaN(f)) {
+        const fechaFabricacion = new Date(base);
+        fechaFabricacion.setDate(fechaFabricacion.getDate() + m + f);
+        hitos.fabricacion = fechaFabricacion;
+    }
+    if (!Number.isNaN(m) && !Number.isNaN(f) && !Number.isNaN(e)) {
+        const fechaEnvio = new Date(base);
+        fechaEnvio.setDate(fechaEnvio.getDate() + m + f + e);
+        hitos.envio = fechaEnvio;
+    }
+    if (idea.fechaRelease) {
+        const fechaRelease = new Date(idea.fechaRelease);
+        if (!isNaN(fechaRelease.getTime())) {
+            hitos.release = fechaRelease;
+        }
+    }
+    return hitos;
+}
+function dateKey(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+// Recorre todas las ideas de todos los artículos y produce un mapa
+// { "YYYY-MM-DD": [ { tipo, ideaNombre, itemName }, ... ] }
+function buildCalendarEvents(ideasByItem, clothingItems) {
+    const map = {};
+    const tipos = [
+        { key: "muestra", label: "muestra" },
+        { key: "fabricacion", label: "fabricacion" },
+        { key: "envio", label: "envio" },
+        { key: "release", label: "release" },
+    ];
+    Object.keys(ideasByItem).forEach((itemId) => {
+        const ideas = ideasByItem[itemId] || [];
+        const item = clothingItems.find((it) => it.id === itemId);
+        const itemName = item ? item.name : itemId;
+        ideas.forEach((idea, i) => {
+            const hitos = calcHitosIdea(idea);
+            const ideaNombre = idea.nombre && idea.nombre.trim() ? idea.nombre : `Idea ${i + 1} — ${itemName}`;
+            tipos.forEach(({ key }) => {
+                const fecha = hitos[key];
+                if (!fecha)
+                    return;
+                const k = dateKey(fecha);
+                if (!map[k])
+                    map[k] = [];
+                map[k].push({ tipo: key, ideaNombre, itemName });
+            });
+        });
+    });
+    return map;
 }
 function formatFecha(fecha) {
     if (!fecha)
@@ -280,7 +344,7 @@ function Home({ onSelectLine }) {
         React.createElement(PosterWord, { label: line.label, active: line.active }))))));
 }
 /* ---------- Galería con swipe ---------- */
-function ClothingGallery({ items, onOpenItem, onBack, onOpenGrid, initialIndex = 0 }) {
+function ClothingGallery({ items, onOpenItem, onBack, onOpenGrid, onOpenCalendar, initialIndex = 0 }) {
     const [index, setIndex] = useState(initialIndex);
     const [dragX, setDragX] = useState(0);
     const [dragging, setDragging] = useState(false);
@@ -324,6 +388,15 @@ function ClothingGallery({ items, onOpenItem, onBack, onOpenGrid, initialIndex =
     const handleEnd = () => {
         if (directionRef.current === "v" && lastDeltaYRef.current < -50) {
             onOpenGrid(index);
+            setDragX(0);
+            setDragging(false);
+            startRef.current = null;
+            startYRef.current = null;
+            directionRef.current = null;
+            return;
+        }
+        if (directionRef.current === "v" && lastDeltaYRef.current > 50) {
+            onOpenCalendar();
             setDragX(0);
             setDragging(false);
             startRef.current = null;
@@ -421,7 +494,7 @@ function ClothingGallery({ items, onOpenItem, onBack, onOpenGrid, initialIndex =
                 fontSize: 11,
                 color: "#B0B0AA",
                 padding: "14px 0 22px",
-            } }, "Desliza \u00B7 toca para ver ideas \u00B7 arriba para ver todas")));
+            } }, "Desliza \u00B7 toca para ideas \u00B7 arriba: todas \u00B7 abajo: calendario")));
 }
 /* ---------- Grilla de todos los artículos (3 columnas) ---------- */
 function ClothingGrid({ items, onSelectItem, onBack }) {
@@ -475,7 +548,307 @@ function ClothingGrid({ items, onSelectItem, onBack }) {
             } }, it.imageSrc ? (React.createElement("img", { src: it.imageSrc, alt: it.name, style: { maxWidth: "85%", maxHeight: "85%", objectFit: "contain" } })) : (React.createElement("svg", { width: "32", height: "32", viewBox: "0 0 24 24", fill: "none" },
             React.createElement("path", { d: "M8 4 L4 7 L6 10 L8 8.5 V20 H16 V8.5 L18 10 L20 7 L16 4 L14 5.5 H10 Z", stroke: "#C5C5C0", strokeWidth: "1.2", strokeLinejoin: "round" })))))))));
 }
-/* ---------- Lista de links desplegable ---------- */
+/* ---------- Calendario — utilidades ---------- */
+const EVENT_COLORS = {
+    muestra: "#5FBF6E", // verde
+    fabricacion: "#E8C547", // amarillo
+    envio: "#E8893C", // naranja
+    release: "#D9534F", // rojo
+};
+const EVENT_LABELS_PANEL = {
+    muestra: (idea, item) => `Llega la muestra de ${idea} — ${item}`,
+    fabricacion: (idea, item) => `Termina la fabricación de ${idea} — ${item}`,
+    envio: (idea, item) => `Llega ${idea} — ${item} a casa`,
+    release: (idea, item) => `Release de ${idea} — ${item}`,
+};
+const MESES_ES = [
+    "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+    "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
+];
+const DIAS_SEMANA_ES = ["L", "M", "X", "J", "V", "S", "D"];
+function getMonthMatrix(year, month) {
+    // month: 0-11. Devuelve array de semanas, cada semana array de 7 {date, inMonth}
+    const firstDay = new Date(year, month, 1);
+    const startWeekday = (firstDay.getDay() + 6) % 7; // lunes=0
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const daysInPrevMonth = new Date(year, month, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < startWeekday; i++) {
+        cells.push({ date: new Date(year, month - 1, daysInPrevMonth - startWeekday + i + 1), inMonth: false });
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+        cells.push({ date: new Date(year, month, d), inMonth: true });
+    }
+    while (cells.length % 7 !== 0 || cells.length < 35) {
+        const last = cells[cells.length - 1].date;
+        const next = new Date(last);
+        next.setDate(next.getDate() + 1);
+        cells.push({ date: next, inMonth: false });
+    }
+    const weeks = [];
+    for (let i = 0; i < cells.length; i += 7) {
+        weeks.push(cells.slice(i, i + 7));
+    }
+    return weeks;
+}
+/* ---------- Calendario — círculo de evento tipo rotulador ---------- */
+function EventMark({ color, offsetIndex = 0 }) {
+    const rotations = [-6, 4, -3, 7, -8];
+    const rot = rotations[offsetIndex % rotations.length];
+    const offset = offsetIndex * 2;
+    return (React.createElement("svg", { width: "34", height: "34", viewBox: "0 0 34 34", style: {
+            position: "absolute",
+            top: -5 - offset,
+            left: -5 + offset,
+            transform: `rotate(${rot}deg)`,
+            pointerEvents: "none",
+        } },
+        React.createElement("ellipse", { cx: "17", cy: "17", rx: "14", ry: "12.5", fill: "none", stroke: color, strokeWidth: "2.2", strokeLinecap: "round", opacity: "0.9" }),
+        React.createElement("ellipse", { cx: "18", cy: "16.5", rx: "13", ry: "12", fill: "none", stroke: color, strokeWidth: "1.3", strokeLinecap: "round", opacity: "0.5" })));
+}
+/* ---------- Calendario — un mes individual ---------- */
+function MonthBlock({ year, month, eventsMap, onDayTap, compact }) {
+    const weeks = getMonthMatrix(year, month);
+    const today = new Date();
+    const todayKey = dateKey(today);
+    return (React.createElement("div", { style: { marginBottom: compact ? 28 : 0 } },
+        compact && (React.createElement("div", { style: {
+                fontSize: 13,
+                fontWeight: 800,
+                letterSpacing: 1,
+                color: "#F5F5F0",
+                marginBottom: 10,
+                textTransform: "uppercase",
+            } }, MESES_ES[month])),
+        React.createElement("div", { style: {
+                display: "grid",
+                gridTemplateColumns: "repeat(7, 1fr)",
+                borderTop: "1px solid #232323",
+                borderLeft: "1px solid #232323",
+            } },
+            DIAS_SEMANA_ES.map((d, i) => (React.createElement("div", { key: i, style: {
+                    fontSize: 10,
+                    color: "#6B6B6B",
+                    textAlign: "center",
+                    padding: "6px 0",
+                    borderRight: "1px solid #232323",
+                    borderBottom: "1px solid #232323",
+                    letterSpacing: 1,
+                } }, d))),
+            weeks.flat().map((cell, i) => {
+                const k = dateKey(cell.date);
+                const events = eventsMap[k] || [];
+                const isToday = k === todayKey;
+                return (React.createElement("button", { key: i, onClick: () => events.length > 0 && onDayTap(k, events), style: {
+                        position: "relative",
+                        aspectRatio: "1 / 1",
+                        background: "none",
+                        border: "none",
+                        borderRight: "1px solid #232323",
+                        borderBottom: "1px solid #232323",
+                        cursor: events.length > 0 ? "pointer" : "default",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 0,
+                    } },
+                    React.createElement("span", { style: {
+                            fontSize: compact ? 11 : 15,
+                            fontWeight: isToday ? 800 : 400,
+                            color: cell.inMonth ? (isToday ? "#F5F5F0" : "#C8C8C2") : "#3A3A3A",
+                            position: "relative",
+                            zIndex: 2,
+                        } }, cell.date.getDate()),
+                    events.slice(0, 3).map((ev, idx) => (React.createElement(EventMark, { key: idx, color: EVENT_COLORS[ev.tipo], offsetIndex: idx })))));
+            }))));
+}
+/* ---------- Calendario — pantalla principal ---------- */
+function CalendarScreen({ ideasByItem, clothingItems, onBack }) {
+    const [view, setView] = useState("MES"); // MES | TRIMESTRE | SEMESTRE | AÑO
+    const [anchor, setAnchor] = useState(() => {
+        const now = new Date();
+        return { year: now.getFullYear(), month: now.getMonth() };
+    });
+    const [activeDay, setActiveDay] = useState(null); // { key, events } | null
+    const dragXRef = useRef(0);
+    const startXRef = useRef(null);
+    const [dragging, setDragging] = useState(false);
+    const eventsMap = useMemo(() => buildCalendarEvents(ideasByItem, clothingItems), [ideasByItem, clothingItems]);
+    const monthsToShow = view === "MES" ? 1 : view === "TRIMESTRE" ? 3 : view === "SEMESTRE" ? 6 : 12;
+    const shiftPeriod = (dir) => {
+        setAnchor((prev) => {
+            let newMonth = prev.month + dir * monthsToShow;
+            let newYear = prev.year;
+            while (newMonth < 0) {
+                newMonth += 12;
+                newYear -= 1;
+            }
+            while (newMonth > 11) {
+                newMonth -= 12;
+                newYear += 1;
+            }
+            return { year: newYear, month: newMonth };
+        });
+    };
+    const handleStart = (x) => {
+        startXRef.current = x;
+        setDragging(true);
+    };
+    const handleMove = (x) => {
+        if (startXRef.current === null)
+            return;
+        dragXRef.current = x - startXRef.current;
+    };
+    const handleEnd = () => {
+        if (dragXRef.current <= -60)
+            shiftPeriod(1);
+        else if (dragXRef.current >= 60)
+            shiftPeriod(-1);
+        dragXRef.current = 0;
+        startXRef.current = null;
+        setDragging(false);
+    };
+    const periodLabel = useMemo(() => {
+        if (view === "MES")
+            return `${MESES_ES[anchor.month]} ${anchor.year}`;
+        if (view === "TRIMESTRE") {
+            const endMonth = (anchor.month + 2) % 12;
+            return `${MESES_ES[anchor.month]} – ${MESES_ES[endMonth]} ${anchor.year}`;
+        }
+        if (view === "SEMESTRE") {
+            const endMonth = (anchor.month + 5) % 12;
+            return `${MESES_ES[anchor.month]} – ${MESES_ES[endMonth]} ${anchor.year}`;
+        }
+        return `${anchor.year}`;
+    }, [view, anchor]);
+    const monthBlocks = [];
+    for (let i = 0; i < monthsToShow; i++) {
+        let m = anchor.month + i;
+        let y = anchor.year;
+        while (m > 11) {
+            m -= 12;
+            y += 1;
+        }
+        monthBlocks.push({ year: y, month: m });
+    }
+    const handleDayTap = (key, events) => {
+        setActiveDay({ key, events });
+    };
+    return (React.createElement("div", { style: {
+            position: "absolute",
+            inset: 0,
+            background: "#0A0A0A",
+            display: "flex",
+            flexDirection: "column",
+        } },
+        React.createElement("div", { style: {
+                display: "flex",
+                alignItems: "center",
+                padding: "18px 16px 0",
+            } },
+            React.createElement("button", { onClick: onBack, style: {
+                    background: "none",
+                    border: "none",
+                    color: "#6B6B6B",
+                    fontSize: 13,
+                    cursor: "pointer",
+                    padding: "6px 8px",
+                    letterSpacing: 0.5,
+                } }, "\u2190 Volver")),
+        React.createElement("div", { style: { padding: "10px 20px 0" } },
+            React.createElement(PosterWord, { label: periodLabel, active: true, fontSize: "11vw" })),
+        React.createElement("div", { style: {
+                display: "flex",
+                gap: 6,
+                padding: "16px 16px 12px",
+            } }, ["MES", "TRIMESTRE", "SEMESTRE", "AÑO"].map((v) => (React.createElement("button", { key: v, onClick: () => setView(v), style: {
+                flex: 1,
+                background: view === v ? "#F5F5F0" : "none",
+                border: "1px solid " + (view === v ? "#F5F5F0" : "#2A2A2A"),
+                borderRadius: 20,
+                padding: "8px 0",
+                color: view === v ? "#0A0A0A" : "#8A8A8A",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: 0.5,
+                cursor: "pointer",
+            } }, v)))),
+        React.createElement("div", { style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "0 16px 10px",
+            } },
+            React.createElement("button", { onClick: () => shiftPeriod(-1), style: {
+                    background: "none",
+                    border: "1px solid #2A2A2A",
+                    borderRadius: 6,
+                    width: 34,
+                    height: 34,
+                    color: "#C8C8C2",
+                    fontSize: 16,
+                    cursor: "pointer",
+                } }, "\u2039"),
+            React.createElement("div", { style: { fontSize: 10, color: "#5A5A5A", letterSpacing: 1 } }, "DESLIZA O TOCA LAS FLECHAS"),
+            React.createElement("button", { onClick: () => shiftPeriod(1), style: {
+                    background: "none",
+                    border: "1px solid #2A2A2A",
+                    borderRadius: 6,
+                    width: 34,
+                    height: 34,
+                    color: "#C8C8C2",
+                    fontSize: 16,
+                    cursor: "pointer",
+                } }, "\u203A")),
+        React.createElement("div", { style: {
+                flex: 1,
+                overflowY: "auto",
+                padding: "4px 16px 24px",
+                touchAction: "pan-y",
+            }, onMouseDown: (e) => handleStart(e.clientX), onMouseMove: (e) => dragging && handleMove(e.clientX), onMouseUp: handleEnd, onMouseLeave: () => dragging && handleEnd(), onTouchStart: (e) => handleStart(e.touches[0].clientX), onTouchMove: (e) => handleMove(e.touches[0].clientX), onTouchEnd: handleEnd }, monthBlocks.map((mb, i) => (React.createElement(MonthBlock, { key: `${mb.year}-${mb.month}`, year: mb.year, month: mb.month, eventsMap: eventsMap, onDayTap: handleDayTap, compact: view !== "MES" })))),
+        activeDay && (React.createElement("div", { style: {
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: "#111111",
+                borderTop: "1px solid #2A2A2A",
+                borderRadius: "16px 16px 0 0",
+                padding: "18px 20px 28px",
+                maxHeight: "55%",
+                overflowY: "auto",
+            } },
+            React.createElement("div", { style: {
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 14,
+                } },
+                React.createElement("div", { style: { fontSize: 12, color: "#6B6B6B", letterSpacing: 1 } }, activeDay.key),
+                React.createElement("button", { onClick: () => setActiveDay(null), style: {
+                        background: "none",
+                        border: "none",
+                        color: "#8A8A8A",
+                        fontSize: 18,
+                        cursor: "pointer",
+                    } }, "\u00D7")),
+            activeDay.events.map((ev, i) => (React.createElement("div", { key: i, style: {
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: "10px 0",
+                    borderTop: i === 0 ? "none" : "1px solid #1E1E1E",
+                } },
+                React.createElement("div", { style: {
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        background: EVENT_COLORS[ev.tipo],
+                        marginTop: 4,
+                        flexShrink: 0,
+                    } }),
+                React.createElement("div", { style: { fontSize: 14, color: "#F0F0EC", lineHeight: 1.4 } }, EVENT_LABELS_PANEL[ev.tipo](ev.ideaNombre, ev.itemName)))))))));
+}
 function LinkListField({ label, links, onChange }) {
     const [open, setOpen] = useState(false);
     const [draft, setDraft] = useState("");
@@ -587,7 +960,7 @@ function NewIdeaForm({ item, onSave, onCancel }) {
     const handleSave = () => {
         onSave(Object.assign(Object.assign({ nombre,
             refLinks,
-            designLinks }, values), { beneficioEsperado: beneficio, fechaDisponible: fechaDisponible ? fechaDisponible.toISOString() : null, diasSobrantes }));
+            designLinks }, values), { beneficioEsperado: beneficio, fechaCreacion: new Date().toISOString(), fechaDisponible: fechaDisponible ? fechaDisponible.toISOString() : null, diasSobrantes }));
     };
     return (React.createElement("div", { style: {
             position: "absolute",
@@ -827,7 +1200,7 @@ function IdeasMenu({ item, ideas, onNewIdea, onBack }) {
 }
 /* ---------- App raíz ---------- */
 function PBRApp() {
-    const [screen, setScreen] = useState("splash"); // splash | home | gallery | grid | ideas | newIdea
+    const [screen, setScreen] = useState("splash"); // splash | home | gallery | grid | calendar | ideas | newIdea
     const [selectedItem, setSelectedItem] = useState(null);
     const [ideasByItem, setIdeasByItem] = useState({}); // { [itemId]: Idea[] }
     const [galleryIndex, setGalleryIndex] = useState(0);
@@ -846,6 +1219,9 @@ function PBRApp() {
     const openGrid = (currentIndex) => {
         setGalleryIndex(currentIndex);
         setScreen("grid");
+    };
+    const openCalendar = () => {
+        setScreen("calendar");
     };
     const selectFromGrid = (index) => {
         setGalleryIndex(index);
@@ -869,8 +1245,9 @@ function PBRApp() {
         } },
         screen === "splash" && React.createElement(SplashScreen, { onDone: goHome }),
         screen === "home" && React.createElement(Home, { onSelectLine: openGallery }),
-        screen === "gallery" && (React.createElement(ClothingGallery, { key: galleryIndex, items: CLOTHING_ITEMS, initialIndex: galleryIndex, onOpenItem: openIdeas, onBack: goHome, onOpenGrid: openGrid })),
+        screen === "gallery" && (React.createElement(ClothingGallery, { key: galleryIndex, items: CLOTHING_ITEMS, initialIndex: galleryIndex, onOpenItem: openIdeas, onBack: goHome, onOpenGrid: openGrid, onOpenCalendar: openCalendar })),
         screen === "grid" && (React.createElement(ClothingGrid, { items: CLOTHING_ITEMS, onSelectItem: selectFromGrid, onBack: () => setScreen("gallery") })),
+        screen === "calendar" && (React.createElement(CalendarScreen, { ideasByItem: ideasByItem, clothingItems: CLOTHING_ITEMS, onBack: () => setScreen("gallery") })),
         screen === "ideas" && selectedItem && (React.createElement(IdeasMenu, { item: selectedItem, ideas: ideasByItem[selectedItem.id] || [], onNewIdea: () => setScreen("newIdea"), onBack: () => setScreen("gallery") })),
         screen === "newIdea" && selectedItem && (React.createElement(NewIdeaForm, { item: selectedItem, onSave: saveIdea, onCancel: () => setScreen("ideas") }))));
 }
